@@ -1,0 +1,119 @@
+name: Reflect
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths: ["reflect/**", ".github/workflows/reflect.yml"]
+  pull_request:
+    paths: ["reflect/**", ".github/workflows/reflect.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: reflect-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helper-tests:
+    name: Helper tests (Linux)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reflect/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install websockets==17.1 zeroconf==0.148.0 Pillow==12.3.0 numpy==2.3.5 pytest==9.1.1
+      - run: python -m pytest -q
+
+  helper-windows:
+    name: Helper on Windows with Claude desktop
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: reflect/helper
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.11"
+      - name: Set up the helper with run.ps1 (venv + dependencies) and check "not running"
+        env:
+          REFLECT_PYTHON: ${{ steps.py.outputs.python-path }}
+        run: |
+          ./run.ps1 -CaptureTest -Out out/not-running.png
+          if ($LASTEXITCODE -ne 2) { throw "expected exit code 2 (Claude desktop not running), got $LASTEXITCODE" }
+          exit 0
+      - name: Unit and protocol tests
+        run: |
+          .venv/Scripts/python -m pip install pytest==9.1.1
+          .venv/Scripts/python -m pytest -q
+      - name: Install and start Claude desktop
+        run: ./ci/install-claude-windows.ps1
+      - name: Wait for the Claude window
+        run: .venv/Scripts/python tools/wait_for_claude.py --timeout 180
+      - name: Capture test
+        run: ./run.ps1 -CaptureTest -Out out/windows-capture.png
+      - name: Capture test in phone mode
+        run: ./run.ps1 -CaptureTest -PhoneMode -Out out/windows-capture-phone.png
+      - name: Live end-to-end check (Bonjour, pair, auth, frames, tap, restore)
+        run: .venv/Scripts/python tools/live_check.py --out out/live
+      - name: Desktop screenshot for diagnosis
+        if: always()
+        run: .venv/Scripts/python -c "import os, mss; os.makedirs('out', exist_ok=True); mss.mss().shot(mon=-1, output='out/desktop.png')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-helper
+          path: reflect/helper/out
+
+  helper-macos:
+    name: Helper on macOS with Claude desktop
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: reflect/helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.11"
+      - name: Set up the helper with run.sh (venv + dependencies) and check "not running"
+        env:
+          REFLECT_PYTHON: ${{ steps.py.outputs.python-path }}
+        run: |
+          set +e
+          ./run.sh --capture-test out/not-running.png
+          code=$?
+          set -e
+          [ "$code" = 2 ] || { echo "expected exit code 2 (Claude desktop not running), got $code"; exit 1; }
+      - name: Unit and protocol tests
+        run: |
+          .venv/bin/python -m pip install pytest==9.1.1
+          .venv/bin/python -m pytest -q
+      - name: Install and start Claude desktop
+        run: |
+          brew install --cask claude
+          open -a Claude
+      - name: Wait for the Claude window
+        run: .venv/bin/python tools/wait_for_claude.py --timeout 180
+      - name: Capture test
+        run: ./run.sh --capture-test out/macos-capture.png
+      - name: Capture test in phone mode
+        run: ./run.sh --capture-test out/macos-capture-phone.png --phone-mode
+      - name: Live end-to-end check (Bonjour, pair, auth, frames, tap, restore)
+        run: .venv/bin/python tools/live_check.py --out out/live
+      - name: Desktop screenshot for diagnosis
+        if: always()
+        run: mkdir -p out && (screencapture -x out/desktop.png || true)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-helper
+          path: reflect/helper/out
