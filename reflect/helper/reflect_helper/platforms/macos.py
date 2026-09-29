@@ -119,20 +119,27 @@ def _ax_get(element, attribute):
     return value if err == 0 else None
 
 
-def _ax_point(element) -> tuple[float, float] | None:
-    value = _ax_get(element, AS.kAXPositionAttribute)
+def _ax_unpack(value, kind):
+    """pyobjc's AXValueGetValue returns the struct itself (older releases: an (ok, struct) pair)."""
     if value is None:
         return None
-    ok, point = AS.AXValueGetValue(value, AS.kAXValueCGPointType, None)
-    return (point.x, point.y) if ok else None
+    try:
+        result = AS.AXValueGetValue(value, kind, None)
+    except Exception:
+        return None
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], bool):
+        return result[1] if result[0] else None
+    return result
+
+
+def _ax_point(element) -> tuple[float, float] | None:
+    point = _ax_unpack(_ax_get(element, AS.kAXPositionAttribute), AS.kAXValueCGPointType)
+    return (point.x, point.y) if point is not None else None
 
 
 def _ax_size(element) -> tuple[float, float] | None:
-    value = _ax_get(element, AS.kAXSizeAttribute)
-    if value is None:
-        return None
-    ok, size = AS.AXValueGetValue(value, AS.kAXValueCGSizeType, None)
-    return (size.width, size.height) if ok else None
+    size = _ax_unpack(_ax_get(element, AS.kAXSizeAttribute), AS.kAXValueCGSizeType)
+    return (size.width, size.height) if size is not None else None
 
 
 def _ax_set_frame(element, x: float, y: float, width: float, height: float) -> None:

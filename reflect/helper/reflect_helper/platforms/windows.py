@@ -66,6 +66,8 @@ user32.GetWindowThreadProcessId.restype = wt.DWORD
 user32.AttachThreadInput.argtypes = [wt.DWORD, wt.DWORD, wt.BOOL]
 user32.SetWindowPos.argtypes = [wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT]
 user32.SetWindowPos.restype = wt.BOOL
+user32.IsZoomed.argtypes = [wt.HWND]
+user32.IsZoomed.restype = wt.BOOL
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -431,7 +433,7 @@ class WindowsBackend:
         hwnd = target.handle
         if hwnd not in self._saved_placements:
             self._saved_placements[hwnd] = win32gui.GetWindowPlacement(hwnd)
-        if win32gui.IsIconic(hwnd) or win32gui.IsZoomed(hwnd):
+        if win32gui.IsIconic(hwnd) or user32.IsZoomed(hwnd):
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             time.sleep(0.3)
         scale = _dpi_scale(hwnd)

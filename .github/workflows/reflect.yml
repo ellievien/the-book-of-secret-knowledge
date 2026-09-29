@@ -117,3 +117,21 @@ jobs:
         with:
           name: macos-helper
           path: reflect/helper/out
+
+  ios:
+    name: iPhone app (xcodebuild)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: reflect/ios
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild -version
+      - name: Compile for iPhone (unsigned) and run the unit tests in the simulator
+        run: ./build.sh --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build-log
+          path: reflect/ios/build/xcodebuild.log

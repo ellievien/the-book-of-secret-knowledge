@@ -111,7 +111,7 @@ class Controller:
             "streaming": self.streaming,
             "phone_mode": self.phone_mode,
             "phone_mode_active": self._applied_aspect is not None,
-            "window": dict(zip(("w", "h"), target.logical_size)) if target else None,
+            "window": {"w": target.logical_size[0], "h": target.logical_size[1]} if target else None,
             "fps": self.fps,
             "message": message,
         }

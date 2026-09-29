@@ -6,3 +6,4 @@ helper/out/
 ios/Reflect.xcodeproj/
 ios/build/
 ios/DerivedData/
+ios/Reflect/Info.plist
