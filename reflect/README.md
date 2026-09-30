@@ -28,9 +28,10 @@ puts Claude's window back to its normal size.
 1. Open the Claude desktop app.
 2. In Terminal: `cd reflect/helper` then `bash run.sh`
 3. The first run installs Python 3.11 and the dependencies.
-4. macOS asks for two permissions for **Terminal**: **Screen & System Audio Recording** (to see
-   Claude's window) and **Accessibility** (to click and type). Turn both on in
-   System Settings → Privacy & Security, then run `bash run.sh` again.
+4. macOS asks whether Terminal may **find devices on local networks**: click **Allow** (that is
+   how the iPhone finds the Mac). It also asks for two permissions for **Terminal**:
+   **Screen & System Audio Recording** (to see Claude's window) and **Accessibility** (to click
+   and type). Turn both on in System Settings → Privacy & Security, then run `bash run.sh` again.
 5. The pairing code appears in Terminal, and the Reflect icon appears in the menu bar.
 
 Over SSH, run `bash run.sh --capture-test capture.png` to save one picture of
@@ -76,6 +77,7 @@ phone, choose **Pair a new phone** in the Reflect tray/menu-bar menu for a new c
 | "Claude desktop not running" | Open the Claude app on the computer. |
 | The computer isn't in the list | Same Wi-Fi? Reflect running? On the phone, tap **Connect by address…** and enter the address printed in the console. |
 | "Local Network access" message | iPhone Settings → Privacy & Security → Local Network → turn on Reflect. |
+| The Mac isn't in the phone's list | On the Mac: System Settings → Privacy & Security → Local Network → turn on Terminal, then restart Reflect. |
 | Black or empty picture on a Mac | Allow Screen & System Audio Recording (see step 2) and restart Reflect. |
 | Taps do nothing on a Mac | Allow Accessibility (see step 2) and restart Reflect. |
 | Pairing refused | Choose **Pair a new phone** in the Reflect menu and use the new code. |
