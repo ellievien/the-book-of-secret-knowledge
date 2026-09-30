@@ -28,6 +28,9 @@ jobs:
           python-version: "3.11"
       - run: pip install websockets==17.1 zeroconf==0.148.0 Pillow==12.3.0 numpy==2.3.5 pytest==9.1.1
       - run: python -m pytest -q
+      - name: iPhone build-script helper tests
+        working-directory: reflect/ios
+        run: python -m pytest -q tools -p no:cacheprovider
 
   helper-windows:
     name: Helper on Windows with Claude desktop

@@ -43,13 +43,16 @@ not Terminal: add `/usr/libexec/sshd-keygen-wrapper` under Screen & System Audio
 You need Xcode on the Mac and your Apple ID signed in to Xcode once
 (Xcode → Settings → Accounts → **+**). A free Apple ID is enough.
 
-1. Plug the iPhone into the Mac with a cable, unlock it and tap **Trust**.
-2. On the Mac (Terminal or SSH): `cd reflect/ios` then `bash build.sh`
-3. The first time only, on the iPhone:
-   * Settings → Privacy & Security → **Developer Mode** → On (the iPhone restarts).
-   * Settings → General → VPN & Device Management → your Apple ID → **Trust**.
-4. Open **Reflect** on the iPhone.
+1. Plug the iPhone into the Mac with a cable, unlock it and tap **Trust** on it. Close the
+   *iPhone Mirroring* window if it is open (a mirrored phone stays locked).
+2. On the iPhone turn on **Developer Mode** *before* building: Settings → Privacy & Security →
+   Developer Mode → On (the iPhone restarts). If the switch is missing, keep the phone plugged in
+   and unlocked and open Xcode → Window → Devices and Simulators once; it then appears.
+3. On the Mac (Terminal or SSH), from this folder: `cd reflect/ios` then `bash build.sh`
+4. The first time only, on the iPhone: Settings → General → VPN & Device Management → your
+   Apple ID → **Trust**. Then open **Reflect**.
 
+`build.sh` checks each of these and says which one is missing.
 With a free Apple ID the app works for 7 days. When it stops opening, run `bash build.sh` again.
 To rebuild after changes, also just run `bash build.sh`.
 

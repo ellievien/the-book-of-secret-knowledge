@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the Reflect iPhone app with xcodebuild and install it on your iPhone.
 # Run on the Mac (works over SSH). The iPhone must be plugged into the Mac by
-# cable the first time.
+# cable, unlocked, trusted, with Developer Mode on (the script checks and tells you).
 #
 #   ./build.sh           build, sign with your Personal Team, install, launch
 #   ./build.sh --check   compile only (no signing) and run the unit tests in the simulator
@@ -21,6 +21,7 @@ xb() {
   mkdir -p build
   if ! xcodebuild "$@" > build/xcodebuild.log 2>&1; then
     grep -E "error:|Error |failed|Code Signing|provisioning" build/xcodebuild.log | sort -u | head -n 40 >&2
+    grep -A 25 "Unable to find a destination" build/xcodebuild.log | head -n 40 >&2 || true
     stop "xcodebuild failed. Full log: $PWD/build/xcodebuild.log"
   fi
   grep -E "\*\* (BUILD|TEST) (SUCCEEDED|FAILED)|Executed [0-9]+ test" build/xcodebuild.log | tail -n 3
@@ -112,24 +113,62 @@ Then run ./build.sh again."
 say "Signing with team $TEAM"
 
 # --- iPhone -------------------------------------------------------------------------
-xcrun devicectl list devices --json-output "$TMP/devices.json" >/dev/null 2>&1 || true
-DEVICE_LINE=$(python3 - "$TMP/devices.json" <<'PY'
-import json, sys
-try:
-    devices = json.load(open(sys.argv[1]))["result"]["devices"]
-except Exception:
-    devices = []
-for d in devices:
-    hw, conn, props = d.get("hardwareProperties", {}), d.get("connectionProperties", {}), d.get("deviceProperties", {})
-    if hw.get("platform") == "iOS" and hw.get("deviceType") == "iPhone" and conn.get("pairingState") == "paired":
-        print(d["identifier"], hw.get("udid", ""), props.get("name", "iPhone").replace(" ", "_"))
-        break
-PY
-)
-read -r DEVICE_ID DEVICE_UDID DEVICE_NAME <<< "${DEVICE_LINE:-}" || true
-[ -n "${DEVICE_ID:-}" ] || stop "No paired iPhone found. Plug the iPhone into the Mac with a cable, unlock it and tap 'Trust' (enter the passcode), then run ./build.sh again.
-   If it still is not found: xcrun devicectl list devices"
-say "Building for ${DEVICE_NAME//_/ }"
+list_phone() {
+  xcrun devicectl list devices --json-output "$TMP/devices.json" >/dev/null 2>&1 || true
+  PHONE_LINE=$(python3 tools/devices.py phone "$TMP/devices.json")
+  DEVICE_ID=""; DEVICE_UDID=""; DEVICE_NAME=""; DEVICE_OS=""; PAIRING=""; DEVMODE=""; DDI=""; TUNNEL=""
+  if [ -n "$PHONE_LINE" ]; then
+    # shellcheck disable=SC2034  # DDI and TUNNEL are read for completeness only
+    IFS='|' read -r DEVICE_ID DEVICE_UDID DEVICE_NAME DEVICE_OS PAIRING DEVMODE DDI TUNNEL <<< "$PHONE_LINE"
+  fi
+}
+
+list_phone
+[ -n "$DEVICE_ID" ] || stop "No iPhone found. Plug the iPhone into this Mac with a cable and unlock it.
+   Close the 'iPhone Mirroring' window if it is open: while it is mirrored the phone stays locked.
+   Then run this again. (To see what the Mac sees: xcrun devicectl list devices)"
+
+if [ "$PAIRING" != "paired" ]; then
+  say "$DEVICE_NAME is not trusted by this Mac yet: unlock it and tap 'Trust' on the iPhone (enter its passcode)"
+  xcrun devicectl manage pair --device "$DEVICE_ID" >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6; do
+    sleep 5
+    list_phone
+    [ "$PAIRING" = "paired" ] && break
+  done
+  [ "$PAIRING" = "paired" ] || stop "$DEVICE_NAME is still not trusted. Unlock the iPhone (not iPhone Mirroring), tap 'Trust' on it, enter the passcode, then run this again."
+fi
+
+if [ "$DEVMODE" = "disabled" ]; then
+  stop "Developer Mode is off on $DEVICE_NAME, so Xcode cannot install apps on it. Turn it on first:
+   iPhone: Settings > Privacy & Security > Developer Mode > On, then Restart when it asks and unlock the phone.
+   (If you do not see 'Developer Mode': keep the iPhone plugged in and unlocked, open Xcode >
+    Window > Devices and Simulators, wait until $DEVICE_NAME appears there, then look again.)
+   Then run this again."
+fi
+
+# Ask Xcode itself which device it will build for; it may still be preparing a new phone for a few minutes.
+DEST_ID=""
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  DEST_TEXT=$(xcodebuild -project Reflect.xcodeproj -scheme Reflect -showdestinations 2>&1 || true)
+  DEST_LINE=$(printf '%s\n' "$DEST_TEXT" | python3 tools/devices.py dest "$DEVICE_UDID" "$DEVICE_NAME")
+  if [ -n "$DEST_LINE" ]; then
+    DEST_ID=${DEST_LINE%%|*}
+    break
+  fi
+  [ "$attempt" = 1 ] && say "Waiting for Xcode to get $DEVICE_NAME ready (the first time takes a few minutes; keep it unlocked)"
+  sleep 10
+done
+if [ -z "$DEST_ID" ]; then
+  printf '\n%s\n' "$(printf '%s\n' "$DEST_TEXT" | python3 tools/devices.py report)" >&2
+  stop "Xcode does not list $DEVICE_NAME (iOS ${DEVICE_OS:-?}) as a device it can build for. Check, in this order:
+   1. The iPhone is unlocked, plugged in by cable, and 'Trust' was tapped.
+   2. Developer Mode is on (Settings > Privacy & Security > Developer Mode).
+   3. Xcode is new enough for this iOS version: run  xcodebuild -version  and update Xcode from the App Store if needed.
+   4. Open Xcode > Window > Devices and Simulators and wait until the iPhone shows no 'preparing' message.
+   Then run this again. Full list Xcode printed:  xcodebuild -project Reflect.xcodeproj -scheme Reflect -showdestinations"
+fi
+say "Building for $DEVICE_NAME (iOS $DEVICE_OS)"
 
 # Over SSH the login keychain (which holds the signing key) is locked.
 if [ -n "${SSH_CONNECTION:-}" ]; then
@@ -138,7 +177,7 @@ if [ -n "${SSH_CONNECTION:-}" ]; then
 fi
 
 xb -project Reflect.xcodeproj -scheme Reflect -configuration Release \
-  -destination "id=$DEVICE_UDID" -derivedDataPath build \
+  -destination "id=$DEST_ID" -derivedDataPath build \
   -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
   DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic build
 APP=build/Build/Products/Release-iphoneos/Reflect.app
@@ -151,10 +190,9 @@ say "Launching Reflect"
 if ! xcrun devicectl device process launch --device "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1; then
   cat <<'MSG'
 
-Reflect is installed. The first time, iOS blocks apps from a new developer:
-  1. On the iPhone: Settings > Privacy & Security > Developer Mode > On (the iPhone restarts).
-  2. Settings > General > VPN & Device Management > your Apple ID > Trust.
-  3. Open Reflect from the Home Screen.
+Reflect is installed. The first time, iOS blocks apps from a new developer, so on the iPhone:
+  1. Settings > General > VPN & Device Management > your Apple ID > Trust.
+  2. Open Reflect from the Home Screen.
 MSG
 fi
 say "Done. Free Apple IDs sign apps for 7 days: run ./build.sh again when Reflect stops opening."
