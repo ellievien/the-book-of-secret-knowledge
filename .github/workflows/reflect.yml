@@ -8,9 +8,11 @@ on:
     paths: ["reflect/**", ".github/workflows/reflect.yml"]
   workflow_dispatch:
 
+# A new push waits for the running checks instead of cancelling them, so
+# every commit's Windows/macOS/iOS results are kept.
 concurrency:
   group: reflect-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   helper-tests:
