@@ -55,6 +55,7 @@ jobs:
           .venv/Scripts/python -m pip install pytest==9.1.1
           .venv/Scripts/python -m pytest -q
       - name: Install and start Claude desktop
+        timeout-minutes: 10
         run: ./ci/install-claude-windows.ps1
       - name: Wait for the Claude window
         run: .venv/Scripts/python tools/wait_for_claude.py --timeout 180 --settle 10
@@ -100,8 +101,11 @@ jobs:
           .venv/bin/python -m pip install pytest==9.1.1
           .venv/bin/python -m pytest -q
       - name: Install and start Claude desktop
+        timeout-minutes: 5
         run: |
           brew install --cask claude
+          # Clear the download quarantine so Gatekeeper's first-launch prompt cannot stall an unattended run.
+          xattr -dr com.apple.quarantine /Applications/Claude.app || true
           # Launch by path: Launch Services has not indexed the freshly installed app yet.
           open /Applications/Claude.app
       - name: Wait for the Claude window
