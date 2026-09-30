@@ -210,6 +210,7 @@ class ReflectServer:
                     max_size=2**20,
                     ping_interval=20,
                     ping_timeout=20,
+                    close_timeout=2,
                     write_limit=2**16,
                 )
             except OSError as exc:

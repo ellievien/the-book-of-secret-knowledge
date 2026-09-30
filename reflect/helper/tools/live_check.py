@@ -275,7 +275,8 @@ async def run(out: Path, port: int, check: Check) -> None:
 
             await ws.send(protocol.encode("settings", phone_mode=True))
             await link.json("status", where=lambda s: s.get("phone_mode_active"))
-            stopped = stop_helper(proc)
+            # Stop while this phone is still connected; keep this loop free to answer the close.
+            stopped = await asyncio.to_thread(stop_helper, proc)
         restored, current = await wait_restored(backend, before)
         if stopped and restored:
             check.ok("restore when the helper quits", f"exit code {proc.returncode}, {current.bounds}")

@@ -228,3 +228,40 @@ async def _full_session(tmp_path):
         await controller.shutdown()
         await server.stop()
         runner.cancel()
+
+
+def test_shutdown_restores_window_before_closing_phones(tmp_path):
+    asyncio.run(_shutdown_order(tmp_path))
+
+
+async def _shutdown_order(tmp_path):
+    from reflect_helper import server as server_module
+
+    backend = StandInBackend()
+    state = State(tmp_path / "state.json")
+    pairing = Pairing(state)
+    controller = Controller(backend, pairing, state, name="Test PC", injector_factory=lambda _b: RecordingInjector())
+    srv = ReflectServer(controller)
+    port = await srv.start(0, "127.0.0.1")
+    runner = asyncio.create_task(controller.run())
+    original_close = server_module.ClientSession.close
+
+    async def recording_close(self, code=1000, reason=""):
+        backend.calls.append(("close",))
+        await original_close(self, code, reason)
+
+    server_module.ClientSession.close = recording_close
+    try:
+        async with connect(f"ws://127.0.0.1:{port}/", compression=None, max_size=2**24) as ws:
+            json.loads(await ws.recv())
+            await ws.send(protocol.encode("pair", code=pairing.code, device="Test iPhone"))
+            await _recv_until(ws, _frame)  # streaming in phone mode
+            backend.calls.clear()
+            started = asyncio.get_running_loop().time()
+            await controller.shutdown()
+            assert asyncio.get_running_loop().time() - started < 3
+        assert backend.calls.index(("exit",)) < backend.calls.index(("close",))
+    finally:
+        server_module.ClientSession.close = original_close
+        await srv.stop()
+        runner.cancel()

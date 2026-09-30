@@ -359,12 +359,14 @@ class Controller:
     async def shutdown(self) -> None:
         self._closing = True
         self.wake()
-        for session in list(self.sessions):
-            await session.close(1001, "Reflect helper stopped")
+        # Give Claude's window back first: Windows allows only ~5 s once the console is closed.
         if self._loop is not None:
             await self._in_capture_thread(self._release)
         else:
             self._release()
+        closing = [asyncio.ensure_future(s.close(1001, "Reflect helper stopped")) for s in list(self.sessions)]
+        if closing:
+            await asyncio.wait(closing, timeout=2)  # a phone that has gone quiet must not hold us up
         for pool in (self._capture_pool, self._encode_pool, self._input_pool):
             pool.shutdown(wait=False, cancel_futures=True)
 
