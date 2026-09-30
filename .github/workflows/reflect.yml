@@ -100,7 +100,8 @@ jobs:
       - name: Install and start Claude desktop
         run: |
           brew install --cask claude
-          open -a Claude
+          # Launch by path: Launch Services has not indexed the freshly installed app yet.
+          open /Applications/Claude.app
       - name: Wait for the Claude window
         run: .venv/bin/python tools/wait_for_claude.py --timeout 180
       - name: Capture test
