@@ -1,0 +1,20 @@
+# Reflect helper dependencies (Python 3.11). Pinned versions all ship binary
+# wheels for Windows x64 and macOS (Apple Silicon and Intel).
+websockets==17.1
+zeroconf==0.148.0
+Pillow==12.3.0
+pystray==0.19.5
+pynput==1.8.2
+mss==10.2.0
+numpy==2.3.5
+
+# Windows
+pywin32==312; sys_platform == "win32"
+windows-capture==2.0.1; sys_platform == "win32"
+
+# macOS
+pyobjc-core==12.2.2; sys_platform == "darwin"
+pyobjc-framework-Cocoa==12.2.2; sys_platform == "darwin"
+pyobjc-framework-Quartz==12.2.2; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices==12.2.2; sys_platform == "darwin"
+pyobjc-framework-ScreenCaptureKit==12.2.2; sys_platform == "darwin"
