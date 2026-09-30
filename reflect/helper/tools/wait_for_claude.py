@@ -15,6 +15,7 @@ from reflect_helper.platforms import load_backend, prepare_process  # noqa: E402
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--settle", type=float, default=0, help="extra seconds for the app to finish drawing")
     args = parser.parse_args()
     prepare_process()
     backend = load_backend()
@@ -23,6 +24,7 @@ def main() -> int:
         target = backend.find_claude_window()
         if target is not None:
             print(f"Claude window found: {target.title!r} {target.bounds} scale={target.scale}", flush=True)
+            time.sleep(args.settle)
             return 0
         time.sleep(2)
     print(f"No Claude window after {args.timeout:.0f} s (running: {backend.is_claude_running()})", flush=True)

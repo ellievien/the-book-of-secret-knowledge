@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -107,26 +108,76 @@ async def discover(timeout: float = 20.0) -> tuple[str, int, dict]:
         await zc.async_close()
 
 
-async def recv_json(ws, kind: str, timeout: float = 15.0, where=lambda m: True) -> dict:
-    async def loop():
+class Link:
+    """Reads one connection in order, keeping frames and JSON messages that arrive early."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.frames: list[bytes] = []
+        self.texts: list[dict] = []
+
+    async def _read(self) -> None:
+        message = await self.ws.recv()
+        if isinstance(message, bytes):
+            self.frames.append(message)
+        else:
+            self.texts.append(json.loads(message))
+
+    async def json(self, kind: str, timeout: float = 15.0, where=lambda m: True) -> dict:
+        async def wait() -> dict:
+            while True:
+                for index, message in enumerate(self.texts):
+                    if message["type"] == kind and where(message):
+                        return self.texts.pop(index)
+                await self._read()
+
+        return await asyncio.wait_for(wait(), timeout)
+
+    async def frame(self, timeout: float = 15.0) -> bytes:
+        async def wait() -> bytes:
+            while not self.frames:
+                await self._read()
+            return self.frames.pop(0)
+
+        return await asyncio.wait_for(wait(), timeout)
+
+    async def drain_frames(self, seconds: float) -> list[bytes]:
+        """Frames arriving within `seconds` (a still picture legitimately sends none)."""
+        try:
+            await asyncio.wait_for(self._forever(), seconds)
+        except asyncio.TimeoutError:
+            pass
+        frames, self.frames = self.frames, []
+        return frames
+
+    async def _forever(self) -> None:
         while True:
-            message = await ws.recv()
-            if isinstance(message, str):
-                data = json.loads(message)
-                if data["type"] == kind and where(data):
-                    return data
-
-    return await asyncio.wait_for(loop(), timeout)
+            await self._read()
 
 
-async def recv_frame(ws, timeout: float = 15.0) -> bytes:
-    async def loop():
-        while True:
-            message = await ws.recv()
-            if isinstance(message, bytes):
-                return message
+def stop_helper(proc: subprocess.Popen) -> bool:
+    """Stop the helper the way a user does (Ctrl+Break / Ctrl+C), so it runs its cleanup."""
+    if proc.poll() is not None:
+        return True
+    try:
+        proc.send_signal(signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGINT)
+        proc.wait(20)
+        return True
+    except (subprocess.TimeoutExpired, OSError):
+        proc.kill()
+        proc.wait(5)
+        return False
 
-    return await asyncio.wait_for(loop(), timeout)
+
+async def wait_restored(backend, before, seconds: float = 8.0):
+    deadline = time.monotonic() + seconds
+    current = None
+    while time.monotonic() < deadline:
+        current = backend.find_claude_window()
+        if current is not None and current.bounds.same_size(before.bounds, tolerance=4):
+            return True, current
+        await asyncio.sleep(0.5)
+    return False, current
 
 
 def cursor_position() -> tuple[int, int]:
@@ -150,39 +201,38 @@ async def run(out: Path, port: int, check: Check) -> None:
     home = tempfile.mkdtemp(prefix="reflect-live-")
     proc, code = start_helper(home, port)
     pump_output(proc)
+    stopped = False
     try:
         host, found_port, props = await discover()
         check.ok("bonjour discovery", f"{host}:{found_port} {props.get('name')!r}")
         url = f"ws://{host}:{found_port}/"
 
         async with connect(url, compression=None, max_size=2**25) as ws:
-            hello = json.loads(await ws.recv())
+            link = Link(ws)
+            hello = await link.json("hello")
             check.ok("hello", f"os={hello['os']} pairing_open={hello['pairing_open']}")
             await ws.send(protocol.encode("pair", code=code, device="live-check"))
-            reply = await recv_json(ws, "pair")
+            reply = await link.json("pair")
             if not reply.get("ok"):
                 check.fail("pair", json.dumps(reply))
                 return
             check.ok("pair")
             device_id, token = reply["device_id"], protocol.unb64(reply["token"])
             await ws.send(protocol.encode("settings", phone_mode=True, viewport={"w": 440, "h": 956}))
-            status = await recv_json(ws, "status", where=lambda s: s.get("phone_mode_active"))
+            status = await link.json("status", where=lambda s: s.get("phone_mode_active"))
             check.ok("phone mode", f"window {status.get('window')}")
 
-            frames = []
-            deadline = time.monotonic() + 20
-            while len(frames) < 3 and time.monotonic() < deadline:
-                frames.append(await recv_frame(ws))
-                if len(frames) == 1:
-                    # nudge the UI so more frames follow (hash compare skips identical ones)
-                    await ws.send(protocol.encode("input", kind="scroll", x=0.5, y=0.5, dx=0, dy=-0.05))
+            frames = [await link.frame()]
+            # Nudge the UI; more frames follow only if the picture changes (identical ones are skipped).
+            await ws.send(protocol.encode("input", kind="scroll", x=0.5, y=0.5, dx=0, dy=-0.05))
+            frames += await link.drain_frames(3.0)
             width, height, jpeg = protocol.unpack_frame(frames[-1])
             image = Image.open(io.BytesIO(jpeg))
             out.mkdir(parents=True, exist_ok=True)
             (out / "stream-frame.jpg").write_bytes(jpeg)
             stddev = ImageStat.Stat(image.convert("L")).stddev[0]
             if image.size == (width, height) and stddev > 2:
-                check.ok("frames", f"{len(frames)} frames, {width}x{height}, {len(jpeg)} bytes, stddev {stddev:.1f}")
+                check.ok("frames", f"{len(frames)} frame(s), {width}x{height}, {len(jpeg)} bytes, stddev {stddev:.1f}")
             else:
                 check.fail("frames", f"size {image.size} vs header {(width, height)}, stddev {stddev:.1f}")
 
@@ -198,30 +248,43 @@ async def run(out: Path, port: int, check: Check) -> None:
 
             await ws.send(protocol.encode("input", kind="key", key="esc"))
             await ws.send(protocol.encode("ping", t=1))
-            await recv_json(ws, "pong")
+            await link.json("pong")
             check.ok("ping/pong")
 
+        restored, current = await wait_restored(backend, before)
+        if restored:
+            check.ok("restore when phone leaves", f"{current.bounds}")
+        else:
+            check.fail("restore when phone leaves", f"before {before.bounds}, now {current and current.bounds}")
+
         async with connect(url, compression=None, max_size=2**25) as ws:
-            hello = json.loads(await ws.recv())
+            link = Link(ws)
+            hello = await link.json("hello")
             proof = protocol.auth_proof(token, protocol.unb64(hello["nonce"]))
             await ws.send(protocol.encode("auth", device_id=device_id, proof=proof))
-            reply = await recv_json(ws, "auth")
+            reply = await link.json("auth")
             check.ok("token auth") if reply.get("ok") else check.fail("token auth", json.dumps(reply))
-            await recv_frame(ws)
+            await link.frame()
             await ws.send(protocol.encode("settings", phone_mode=False))
-            await recv_json(ws, "status", where=lambda s: not s.get("phone_mode_active"))
-            await asyncio.sleep(1.0)
-            restored = backend.find_claude_window()
-            if restored and restored.bounds.same_size(before.bounds, tolerance=4):
-                check.ok("restore size", f"{restored.bounds}")
+            await link.json("status", where=lambda s: s.get("phone_mode") is False and not s.get("phone_mode_active"))
+            restored, current = await wait_restored(backend, before)
+            if restored:
+                check.ok("restore when phone mode is turned off", f"{current.bounds}")
             else:
-                check.fail("restore size", f"before {before.bounds}, after {restored and restored.bounds}")
+                check.fail("restore when phone mode is turned off", f"before {before.bounds}, now {current and current.bounds}")
+
+            await ws.send(protocol.encode("settings", phone_mode=True))
+            await link.json("status", where=lambda s: s.get("phone_mode_active"))
+            stopped = stop_helper(proc)
+        restored, current = await wait_restored(backend, before)
+        if stopped and restored:
+            check.ok("restore when the helper quits", f"exit code {proc.returncode}, {current.bounds}")
+        else:
+            check.fail("restore when the helper quits",
+                       f"graceful stop {'ok' if stopped else 'failed'}, before {before.bounds}, now {current and current.bounds}")
     finally:
-        proc.terminate()
-        try:
-            proc.wait(10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        if not stopped:
+            stop_helper(proc)
 
 
 def main() -> int:

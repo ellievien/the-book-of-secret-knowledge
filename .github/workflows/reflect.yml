@@ -1,10 +1,10 @@
 name: Reflect
 
 on:
+  # Pushes to the working branches run the checks (and show on their PR); a
+  # separate pull_request trigger would only run everything twice.
   push:
     branches: ["claude/**"]
-    paths: ["reflect/**", ".github/workflows/reflect.yml"]
-  pull_request:
     paths: ["reflect/**", ".github/workflows/reflect.yml"]
   workflow_dispatch:
 
@@ -55,7 +55,7 @@ jobs:
       - name: Install and start Claude desktop
         run: ./ci/install-claude-windows.ps1
       - name: Wait for the Claude window
-        run: .venv/Scripts/python tools/wait_for_claude.py --timeout 180
+        run: .venv/Scripts/python tools/wait_for_claude.py --timeout 180 --settle 10
       - name: Capture test
         run: ./run.ps1 -CaptureTest -Out out/windows-capture.png
       - name: Capture test in phone mode
@@ -103,7 +103,7 @@ jobs:
           # Launch by path: Launch Services has not indexed the freshly installed app yet.
           open /Applications/Claude.app
       - name: Wait for the Claude window
-        run: .venv/bin/python tools/wait_for_claude.py --timeout 180
+        run: .venv/bin/python tools/wait_for_claude.py --timeout 180 --settle 10
       - name: Capture test
         run: ./run.sh --capture-test out/macos-capture.png
       - name: Capture test in phone mode
